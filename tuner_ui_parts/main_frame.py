@@ -133,6 +133,7 @@ class MainFrame(tkinter.Frame):
                                                        height=self.image_manager.bell_image.height(),
                                                        width=self.image_manager.bell_image.width())
         self.button_mute.place(anchor=tkinter.NE, relx=0.95, rely=0.05)
+        self.button_mute.set_pressed(True)
 
     def update_color(self):
         self.configure(bg=self.color_manager.background_layer_1)

@@ -22,6 +22,8 @@ from tuner_appearance_manager.timing import Timer
 from tuner_ui_parts.main_frame import MainFrame
 from tuner_ui_parts.settings_frame import SettingsFrame
 
+import pyautogui as pag
+
 try:
     from usage_monitoring import usage_monitor
 except ImportError:
@@ -37,7 +39,8 @@ class App(tkinter.Tk):
         if not Settings.COMPILED_APP_MODE:
             if sys.platform == "darwin":  # macOS
                 if Version(tkinter.Tcl().call("info", "patchlevel")) >= Version("8.6.9"):  # Tcl/Tk >= 8.6.9
-                    os.system("defaults write -g NSRequiresAquaSystemAppearance -bool No")  # Only for dark-mode testing!
+                    os.system(
+                        "defaults write -g NSRequiresAquaSystemAppearance -bool No")  # Only for dark-mode testing!
                     # WARNING: This command applies macOS dark-mode on all programs. This can cause bugs on some programs.
                     # Currently this works only with anaconda python version (python.org Tcl/Tk version is only 8.6.8).
                     pass
@@ -79,23 +82,7 @@ class App(tkinter.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        if sys.platform == "darwin":  # macOS
-            self.bind("<Command-q>", self.on_closing)
-            self.bind("<Command-w>", self.on_closing)
-            self.createcommand('tk::mac::Quit', self.on_closing)
-            self.createcommand('tk::mac::ShowPreferences', self.draw_settings_frame)
-
-            menu_bar = tkinter.Menu(master=self)
-            app_menu = tkinter.Menu(menu_bar, name='apple')
-            menu_bar.add_cascade(menu=app_menu)
-
-            app_menu.add_command(label='About ' + Settings.APP_NAME, command=self.about_dialog)
-            app_menu.add_separator()
-
-            self.config(menu=menu_bar)
-
-        elif "win" in sys.platform:  # Windows
-            self.bind("<Alt-Key-F4>", self.on_closing)
+        self.bind("<Alt-Key-F4>", self.on_closing)
 
         self.draw_main_frame()
 
@@ -103,6 +90,32 @@ class App(tkinter.Tk):
             self.main_frame.button_mute.set_pressed(True)
 
         self.open_app_time = time.time()
+
+        self.last_note = ""
+        self.notes_pressed = {}
+
+    def handle_note(self, note):
+        print(note)
+        if note != self.last_note:
+            self.last_note = note
+            if note == 40:  # low e
+                if "lowE" not in self.notes_pressed.keys():
+                    self.notes_pressed["lowE"] = False
+                if not self.notes_pressed['lowE']:
+                    pag.keyDown("w")
+                else:
+                    pag.keyUp("w")
+                self.notes_pressed["lowE"] = not self.notes_pressed["lowE"]
+            elif note == 41:
+                pag.keyDown("a")
+            elif note == 42:
+                pag.keyDown("s")
+            elif note == 43:
+                pag.keyDown("d")
+            elif note == 44:
+                pag.keyDown("space")
+            elif note == 64:  # high e
+                pass
 
     @staticmethod
     def about_dialog():
@@ -142,29 +155,6 @@ class App(tkinter.Tk):
                         # close program if user doesnt agree
                         self.on_closing()
 
-    def check_for_updates(self):
-        # check if user agreed on update checking
-        if self.read_user_setting("check_for_updates") is True:
-            try:
-                # use github API to get latest version string
-                response = requests.get(Settings.GITHUB_API_URL + "/releases/latest")
-                latest_version = response.json()["tag_name"]
-            except Exception as err:
-                sys.stderr.write(str(err) + "/n")
-                return
-
-            if Version(latest_version) > Version(Settings.VERSION):
-                answer = tkinter.messagebox.askyesno(title=Settings.APP_NAME,
-                                                     message="A new version of this app is available. \n\n" +
-                                                             "Do you want to download it?")
-                if answer is True:
-                    webbrowser.open(Settings.GITHUB_URL + "/releases/latest")
-                else:
-                    answer = tkinter.messagebox.askyesno(title=Settings.APP_NAME,
-                                                         message="Ask again next time? \n\n")
-                    if answer is False:
-                        self.write_user_setting("check_for_updates", False)
-
     def write_user_setting(self, setting, value):
         with open(self.main_path + Settings.USER_SETTINGS_PATH, "r") as file:
             user_settings = json.load(file)
@@ -182,14 +172,6 @@ class App(tkinter.Tk):
 
     def on_closing(self, event=0):
         self.write_user_setting("bell_muted", self.main_frame.button_mute.is_pressed())
-        self.check_for_updates()
-
-        if not Settings.COMPILED_APP_MODE:
-            if sys.platform == "darwin":  # macOS
-                if Version(tkinter.Tcl().call("info", "patchlevel")) >= Version("8.6.9"):  # Tcl/Tk >= 8.6.9
-                    os.system("defaults delete -g NSRequiresAquaSystemAppearance")  # Only for dark-mode testing!
-                    # This command reverts the dark-mode setting for all programs.
-                    pass
 
         self.audio_analyzer.running = False
         self.play_sound_thread.running = False
@@ -215,9 +197,11 @@ class App(tkinter.Tk):
         self.handle_appearance_mode_change()
 
         # handle new usage statistics when program is started
-        if self.read_user_setting("id") is None: self.write_user_setting("id", random.randint(10**20, (10**21)-1))  # generate random id
-        self.write_user_setting("open_times", self.read_user_setting("open_times")+1)  # increase open_times counter
-        self.manage_usage_stats(self.read_user_setting("open_times"), self.read_user_setting("id"))  # send open_times value and id
+        if self.read_user_setting("id") is None: self.write_user_setting("id", random.randint(10 ** 20, (
+                10 ** 21) - 1))  # generate random id
+        self.write_user_setting("open_times", self.read_user_setting("open_times") + 1)  # increase open_times counter
+        self.manage_usage_stats(self.read_user_setting("open_times"),
+                                self.read_user_setting("id"))  # send open_times value and id
 
         while self.audio_analyzer.running:
 
@@ -234,13 +218,16 @@ class App(tkinter.Tk):
 
                     # calculate nearest note number, name and frequency
                     nearest_note_number = round(number)
+
+                    self.handle_note(nearest_note_number)
+
                     nearest_note_freq = self.audio_analyzer.number_to_frequency(nearest_note_number, self.a4_frequency)
 
                     # calculate frequency difference from freq to nearest note
                     freq_difference = nearest_note_freq - freq
 
                     # calculate the frequency difference to the next note (-1)
-                    semitone_step = nearest_note_freq - self.audio_analyzer.number_to_frequency(round(number-1),
+                    semitone_step = nearest_note_freq - self.audio_analyzer.number_to_frequency(round(number - 1),
                                                                                                 self.a4_frequency)
 
                     # calculate the angle of the display needle
@@ -274,9 +261,10 @@ class App(tkinter.Tk):
 
                     # update ui note labels and display needle
                     self.main_frame.set_needle_angle(np.average(self.needle_buffer_array))
-                    self.main_frame.set_note_names(note_name=self.audio_analyzer.number_to_note_name(self.nearest_note_number_buffered),
-                                                   note_name_lower=self.audio_analyzer.number_to_note_name(self.nearest_note_number_buffered - 1),
-                                                   note_name_higher=self.audio_analyzer.number_to_note_name(self.nearest_note_number_buffered + 1))
+                    self.main_frame.set_note_names(
+                        note_name=self.audio_analyzer.number_to_note_name(self.nearest_note_number_buffered),
+                        note_name_lower=self.audio_analyzer.number_to_note_name(self.nearest_note_number_buffered - 1),
+                        note_name_higher=self.audio_analyzer.number_to_note_name(self.nearest_note_number_buffered + 1))
 
                     # calculate difference in cents
                     if semitone_step == 0:
